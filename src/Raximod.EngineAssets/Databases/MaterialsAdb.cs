@@ -1,0 +1,215 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using Raximod.EngineAssets.Archives;
+
+namespace Raximod.EngineAssets.Databases
+{
+    /// <summary>
+    /// The engine's material database (<c>materials.adb</c>, packed inside <c>startup.pak</c>). Maps a
+    /// mesh section's material NAME to the texture the engine actually draws for it, plus whether the
+    /// material is translucent. This is the authoritative name→texture link: a section material name
+    /// frequently differs from its texture (e.g. <c>building_surface</c> → <c>alien1</c>,
+    /// <c>105mm_cannon_lod1</c> → <c>105mm_cannon</c>, <c>glass</c> → <c>cubeface01</c>), so resolving
+    /// by name identity picks the wrong texture.
+    ///
+    /// <para>Format: the <c>chunky/asciidatabase</c> wrapper holds a <c>mat_begin</c> container: a string
+    /// pool, a name index of <c>(nameOffset, recOffset)</c> pairs, then a command stream of records
+    /// (<c>mat_surface</c>, <c>mat_pipeline</c>, <c>mat_texture1..4</c>, <c>mat_anim1..4</c>,
+    /// <c>mat_stage*</c>, … <c>mat_end</c>) separated by a zero word. A name's record begins at
+    /// <c>commandStart + (recOffset − 1) × 4</c> (<c>recOffset</c> is a 1-based u32-word offset; verified
+    /// to land on a record boundary for 4911/4912 shipped materials). Each record's <c>mat_texture1</c>
+    /// is the base surface texture; animated materials (water) carry <c>mat_anim1</c> instead; many
+    /// materials are bare <c>mat_surface … mat_end</c> stubs whose texture is simply the material name.</para>
+    /// </summary>
+    public sealed class MaterialsAdb
+    {
+        /// <summary>The base texture the engine binds for a material (null for texture-less stubs), and
+        /// whether the material draws translucent (<c>mat_pipeline alpha_sort/effect</c> or a blend flag).</summary>
+        /// <summary>How a material uses its base texture's alpha channel — read from materials.adb render
+        /// state, which is authoritative (unlike inferring opacity from the pixels).</summary>
+        public enum AlphaRole
+        {
+            /// <summary>Not stated by the DB; the caller should fall back to a pixel heuristic.</summary>
+            Unknown,
+            /// <summary>Genuine alpha-test cutout (foliage, grates): the alpha IS opacity — keep it.</summary>
+            Cutout,
+            /// <summary>The alpha feeds a texture-stage effect (sphere/cube env-map modulation — the Vanu
+            /// shiny-armour look, vehicle hulls, terminals), not opacity. The material draws fully solid, so
+            /// the alpha must be ignored (forced opaque) or the alpha test punches holes through the model.</summary>
+            EffectMask,
+        }
+
+        public readonly record struct MaterialDef(string? Texture, bool Translucent, AlphaRole Alpha,
+            string? DetailTexture, float TileRate);
+
+        private readonly Dictionary<string, MaterialDef> _byName = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Number of material definitions parsed.</summary>
+        public int Count => _byName.Count;
+
+        /// <summary>Load and parse <c>&lt;assetDir&gt;/startup.pak → materials.adb</c>, or null if it is
+        /// absent. Malformed data throws: extraction must never silently fall back
+        /// after a source database was found.</summary>
+        public static MaterialsAdb? TryLoad(string? assetDir)
+        {
+            if (string.IsNullOrEmpty(assetDir)) return null;
+            string pakPath = Path.Combine(assetDir, "startup.pak");
+            if (!File.Exists(pakPath)) return null;
+            PakArchive pak = PakArchive.Load(File.ReadAllBytes(pakPath));
+            int idx = pak.IndexOf("materials.adb");
+            if (idx < 0) return null;
+            var m = new MaterialsAdb();
+            m.ParseInternal(pak.Extract(idx));
+            return m;
+        }
+
+        public static MaterialsAdb Parse(byte[] data)
+        {
+            ArgumentNullException.ThrowIfNull(data);
+            var result = new MaterialsAdb();
+            result.ParseInternal(data);
+            return result;
+        }
+
+        /// <summary>
+        /// The material definition for a section material, trying the whole name first, then the base part
+        /// before a <c>'+'</c> (section names are <c>&lt;baseMaterial&gt;+&lt;lightmap&gt;</c>). Returns null
+        /// when the material is unknown or carries no texture of its own (a stub) — the caller then resolves
+        /// the texture from the material/base name directly.
+        /// </summary>
+        public MaterialDef? Lookup(string material)
+        {
+            if (string.IsNullOrEmpty(material)) return null;
+            if (_byName.TryGetValue(material, out MaterialDef d) && d.Texture != null) return d;
+            // Fall back to the base material only for object "<base>+<lightmap>" names (the lightmap suffix
+            // starts with '_'). Terrain blends "<cell>+<blend>" must resolve to the blend (the suffix, which
+            // the caller's name heuristic handles) — NOT the shared base cell material, or every tile would
+            // get one texture.
+            int plus = material.IndexOf('+');
+            if (plus > 0 && plus + 1 < material.Length && material[plus + 1] == '_'
+                && _byName.TryGetValue(material.Substring(0, plus), out MaterialDef b) && b.Texture != null) return b;
+            return null;
+        }
+
+        /// <summary>True if the material (or its base before '+') is defined translucent, even when it
+        /// carries no texture of its own.</summary>
+        public bool IsTranslucent(string material)
+        {
+            if (string.IsNullOrEmpty(material)) return false;
+            if (_byName.TryGetValue(material, out MaterialDef d)) return d.Translucent;
+            int plus = material.IndexOf('+');
+            if (plus > 0 && plus + 1 < material.Length && material[plus + 1] == '_'
+                && _byName.TryGetValue(material.Substring(0, plus), out MaterialDef b)) return b.Translucent;
+            return false;
+        }
+
+        /// <summary>The alpha role of a material (or its base before '+'), from the engine's render state.
+        /// Returns <see cref="AlphaRole.Unknown"/> when the material isn't in the DB — the caller then falls
+        /// back to a pixel heuristic to decide whether the alpha is a cutout.</summary>
+        public AlphaRole GetAlphaRole(string material)
+        {
+            if (string.IsNullOrEmpty(material)) return AlphaRole.Unknown;
+            if (_byName.TryGetValue(material, out MaterialDef d)) return d.Alpha;
+            int plus = material.IndexOf('+');
+            if (plus > 0 && plus + 1 < material.Length && material[plus + 1] == '_'
+                && _byName.TryGetValue(material.Substring(0, plus), out MaterialDef b)) return b.Alpha;
+            return AlphaRole.Unknown;
+        }
+
+        /// <summary>
+        /// The detail texture + tile rate for EXACTLY this material name (no <c>'+'</c>-splitting fallback —
+        /// unlike <see cref="Lookup"/>, callers must pass the record they actually want). Terrain's detail
+        /// texture/tile rate live on the map-cell base record (e.g. <c>"map14"</c>), not the per-tile blend
+        /// record (<c>"map140001"</c>, which has no materials.adb entry of its own) — so
+        /// <c>TextureProvider.ResolveDetail</c> always queries the prefix before the last
+        /// <c>'+'</c>, which is also correct for ordinary object materials since mat_detail there sits on
+        /// the same base record as mat_texture1. Also unlike <see cref="Lookup"/>, this does NOT require the
+        /// record to carry its own mat_texture1/mat_anim1 — some detail-bearing bases (doors/trees) may not.
+        /// </summary>
+        public bool TryGetDetail(string material, out string? detailTexture, out float tileRate)
+        {
+            detailTexture = null;
+            tileRate = 1f;
+            if (string.IsNullOrEmpty(material) || !_byName.TryGetValue(material, out MaterialDef d) || d.DetailTexture == null)
+            {
+                return false;
+            }
+            detailTexture = d.DetailTexture;
+            tileRate = d.TileRate;
+            return true;
+        }
+
+        private void ParseInternal(byte[] data)
+        {
+            AsciiCommandDatabase database = AsciiCommandDatabase.Parse(data)
+                ?? throw new InvalidDataException("materials.adb has no semantic records");
+            foreach ((string name, IReadOnlyList<AsciiCommandDatabase.Command> commands) in database.Records)
+                _byName.Add(name, ReadRecord(commands));
+        }
+
+        private static MaterialDef ReadRecord(IReadOnlyList<AsciiCommandDatabase.Command> commands)
+        {
+            string? tex1 = null, anim1 = null, detail = null;
+            float tileRate = 1f;
+            bool translucent = false;
+            bool alphaTest = false;   // a mat_state that enables alpha testing → a genuine cutout
+            bool effectMask = false;  // a *modulatealpha* stage consumes the alpha → it isn't opacity
+            foreach (AsciiCommandDatabase.Command command in commands)
+            {
+                string cmd = command.Name;
+                string Arg1() => command.Arguments.FirstOrDefault() ?? "";
+                switch (cmd)
+                {
+                    case "mat_texture1": tex1 = Arg1(); break;
+                    case "mat_anim1": anim1 = Arg1(); break;
+                    // The tiled detail texture blended over the base albedo (terrain, some doors/trees) and
+                    // its UV tile rate relative to the base UV (e.g. terrain's mat_tilerate("16") — the
+                    // detail layer repeats 16x more densely than the base tile). Both args are stored as
+                    // ASCII in the string pool, not binary, so a plain float parse is correct.
+                    case "mat_detail": detail = Arg1(); break;
+                    case "mat_tilerate":
+                        if (float.TryParse(Arg1(), System.Globalization.CultureInfo.InvariantCulture, out float tr)) tileRate = tr;
+                        break;
+                    case "mat_pipeline": { string v = Arg1(); if (v == "alpha_sort" || v == "effect") translucent = true; break; }
+                    case "mat_alphablend":
+                    case "mat_sortalpha": translucent = true; break;
+                    case "mat_state":
+                        if (Arg1().Contains("alphatest", StringComparison.OrdinalIgnoreCase)) alphaTest = true;
+                        break;
+                    default:
+                        // Any texture stage that modulates by alpha (sphere/cube env-map) means the base
+                        // texture's alpha is a spec/reflection mask, not a cutout.
+                        if (cmd.StartsWith("mat_stage", StringComparison.Ordinal) &&
+                            Arg1().Contains("modulatealpha", StringComparison.OrdinalIgnoreCase))
+                        {
+                            effectMask = true;
+                        }
+                        break;
+                }
+            }
+            string? tex = !string.IsNullOrEmpty(tex1) ? tex1 : (!string.IsNullOrEmpty(anim1) ? anim1 : null);
+            // Don't surface a texture that isn't a usable flat albedo:
+            //  • "null" — the engine's no-texture sentinel (a blank texture named "null" is even shipped),
+            //    used by e.g. the "water+null"/"tide" surfaces; treating it as a texture paints them white.
+            //  • reflection cube-maps (environment maps applied via a texgen stage, e.g. glass → cubeface01)
+            //    and placeholder/debug maps, which read wrong as flat textures.
+            // In each case the caller falls back to resolving the albedo from the material name instead.
+            if (tex != null && IsNonAlbedo(tex)) tex = null;
+            if (string.IsNullOrEmpty(detail) || IsNonAlbedo(detail)) detail = null;
+            // Alpha-test (a real cutout) wins if both are somehow present; otherwise a modulation stage marks
+            // the alpha as an effect mask. Neither → Unknown, and the caller falls back to a pixel test.
+            AlphaRole alpha = alphaTest ? AlphaRole.Cutout : (effectMask ? AlphaRole.EffectMask : AlphaRole.Unknown);
+            return new MaterialDef(tex, translucent, alpha, detail, tileRate);
+        }
+
+        private static bool IsNonAlbedo(string texture) =>
+            texture.Equals("null", StringComparison.OrdinalIgnoreCase)
+            || texture.StartsWith("cubemap", StringComparison.OrdinalIgnoreCase)
+            || texture.StartsWith("cubeface", StringComparison.OrdinalIgnoreCase)
+            || texture.Contains("debug", StringComparison.OrdinalIgnoreCase);
+
+    }
+}

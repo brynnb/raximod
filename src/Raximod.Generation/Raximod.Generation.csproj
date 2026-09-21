@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Raximod.Generation</RootNamespace>
+    <AssemblyName>Raximod.Generation</AssemblyName>
+    <!-- Generation code uses implicit framework imports while the lossless parser library keeps its
+         explicit-only house style. -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Pure I/O and conversion behind the Raximod commands; no UI dependencies. -->
+    <Description>Headless PlanetSide asset generation, packaging, validation, and inspection.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Raximod.Generation.Tests" />
+    <ProjectReference Include="..\Raximod.EngineAssets\Raximod.EngineAssets.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Headless glTF 2.0/GLB authoring. Kept out of EngineAssets so the binary format readers
+         remain dependency-free and reusable by consumers that do not need interchange export. -->
+    <PackageReference Include="SharpGLTF.Toolkit" Version="1.0.4" />
+  </ItemGroup>
+
+</Project>

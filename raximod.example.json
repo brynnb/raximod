@@ -1,0 +1,11 @@
+{
+  "format": "raximod-game-export",
+  "version": 1,
+  "source": "/path/to/PlanetSide",
+  "output": "/path/to/game-assets/planetside",
+  "psforever": "/path/to/PSForever",
+  "workers": 4,
+  "overwrite": false,
+  "crossFamilyTextureDeduplication": true,
+  "failOnWarning": false
+}

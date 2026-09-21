@@ -1,0 +1,114 @@
+name: Build Platforms
+
+# Publishes self-contained, single-folder builds for the listed Windows, macOS, and Linux targets
+# and uploads each as an archive. ReadyToRun precompiles IL to native at publish
+# time for faster startup (it especially helps ARM64, where JIT warmup is costlier); crossgen2 handles the
+# cross-arch legs.
+#
+# Runs manually for review artifacts or from a version tag. Tag builds attach archives to that
+# GitHub Release; manual builds leave them as workflow artifacts.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+            archive: zip
+          - rid: win-arm64
+            os: windows-latest
+            archive: zip
+          - rid: osx-arm64
+            os: macos-latest       # native Apple silicon runner
+            archive: tar
+          - rid: osx-x64
+            os: macos-latest
+            archive: tar
+          - rid: linux-x64
+            os: ubuntu-latest
+            archive: tar
+          - rid: linux-arm64
+            os: ubuntu-latest       # cross-compiled via crossgen2
+            archive: tar
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Read app version
+        id: ver
+        shell: pwsh
+        run: |
+          $props = Get-Content Directory.Build.props -Raw
+          $version = [regex]::Match($props, '<VersionPrefix>([^<]+)</VersionPrefix>').Groups[1].Value
+          $suffix = [regex]::Match($props, '<VersionSuffix>([^<]*)</VersionSuffix>').Groups[1].Value
+          if (-not $version) { throw "VersionPrefix not found" }
+          # Same shape as the tags already published: v0.1.0-beta, v0.2.0-beta.
+          $tag = if ($suffix) { "v$version-$suffix" } else { "v$version" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Decide whether this run publishes
+        id: rel
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A tag build publishes to exactly the tag that triggered it -- unchanged behaviour.
+          if ($env:GITHUB_REF.StartsWith('refs/tags/v')) {
+            "publish=true" >> $env:GITHUB_OUTPUT
+            "tag=$env:GITHUB_REF_NAME" >> $env:GITHUB_OUTPUT
+            Write-Host "Tag build: publishing to $env:GITHUB_REF_NAME"
+            exit 0
+          }
+          "publish=false" >> $env:GITHUB_OUTPUT
+          Write-Host "Manual run: producing review artifacts without publishing a release."
+          exit 0
+
+      - name: Publish (${{ matrix.rid }}, self-contained, ReadyToRun)
+        shell: pwsh
+        run: >
+          dotnet publish src/Raximod.Cli/Raximod.Cli.csproj
+          -c Release -r ${{ matrix.rid }} --self-contained true
+          -p:PublishReadyToRun=true -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false
+          -o publish/Raximod-${{ matrix.rid }}
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: Compress-Archive -Path publish/Raximod-${{ matrix.rid }}/* -DestinationPath Raximod-${{ steps.ver.outputs.version }}-${{ matrix.rid }}.zip
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar'
+        run: tar -czf Raximod-${{ steps.ver.outputs.version }}-${{ matrix.rid }}.tar.gz -C publish/Raximod-${{ matrix.rid }} .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Raximod-${{ matrix.rid }}
+          path: Raximod-${{ steps.ver.outputs.version }}-${{ matrix.rid }}.*
+          if-no-files-found: error
+
+      - name: Publish to release
+        if: steps.rel.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.rel.outputs.tag }}
+          files: Raximod-${{ steps.ver.outputs.version }}-${{ matrix.rid }}.*
+          # A tag with a pre-release suffix (e.g. v0.1.0-beta) publishes as a GitHub pre-release; a clean
+          # tag (v1.0.0) publishes as a normal release.
+          prerelease: ${{ contains(steps.rel.outputs.tag, '-') }}

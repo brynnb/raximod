@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Raximod.Modules</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Raximod.EngineAssets/Raximod.EngineAssets.csproj" />
+    <ProjectReference Include="../Raximod.Generation/Raximod.Generation.csproj" />
+  </ItemGroup>
+</Project>

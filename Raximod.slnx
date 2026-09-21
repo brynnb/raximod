@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Raximod.EngineAssets/Raximod.EngineAssets.csproj" />
+    <Project Path="src/Raximod.Generation/Raximod.Generation.csproj" />
+    <Project Path="src/Raximod.Cli/Raximod.Cli.csproj" />
+    <Project Path="src/Raximod.Modules/Raximod.Modules.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Raximod.Generation.Tests/Raximod.Generation.Tests.csproj" />
+  </Folder>
+</Solution>

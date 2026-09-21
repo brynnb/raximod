@@ -1,0 +1,33 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <!-- Classic, explicit style: no top-level statements, no implicit global usings. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Features>strict</Features>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <Authors>Raximod contributors</Authors>
+    <Product>Raximod</Product>
+    <!-- Single source of truth for the command-line release version. VersionPrefix drives the
+         numeric Assembly/File versions; VersionSuffix supplies the prerelease tag; CI reads both
+         values when naming platform archives. -->
+    <VersionPrefix>0.3.0</VersionPrefix>
+    <VersionSuffix>beta</VersionSuffix>
+    <InformationalVersion>0.3.0 Beta</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- Raximod's source and published .NET packages use the MIT license. Optional recovery-tool
+         dependencies are documented separately in THIRD-PARTY-NOTICES.md. -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 Raximod contributors</Copyright>
+
+    <!-- Cross-platform hardening (Windows/macOS/Linux, x64 + ARM64):
+         - InvariantGlobalization removes the native ICU (libicu) dependency, which is the single most
+           common "works on my distro" failure on minimal Linux images; the app only uses ordinal/invariant
+           string operations, so behaviour is unchanged. Formatting shows invariant (period-decimal) numbers.
+         - TieredPGO (dynamic profile-guided optimization) improves steady-state throughput of the hot
+           decode/assembly/render loops on every architecture. Default in .NET 8+, pinned here for clarity. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+</Project>
