@@ -1,16 +1,19 @@
 # Raximod
 
+<img width="2656" height="1470" alt="image" src="https://github.com/user-attachments/assets/52857eeb-7592-4dbb-8679-1f2bb5280011" />
+
+
 Raximod is a headless command-line toolkit for extracting and packaging assets from an installed
 PlanetSide client. It reads the original archive, mesh, animation, texture, map, surface, and ASCII
 database formats and produces portable GLB models or optimized game bundles. This project is the extraction side of TerraSunder, which is a recreation of the original Planetside client in Babylon.js so it's playable in a browser. That project is located and playable at https://terrasunder.net/.
 
-The extraction pipeline is estimated to be approximately 90–95% complete and accurate. A handful
+I'd estimate extraction pipeline to be about 90–95% complete and accurate. A handful
 of areas may still differ slightly from the original client—for example, terminal displays and some
 decorative elements. Other areas may require small additional extraction work, such as certain
 nuanced aspects of vehicle collision models.
 
 Raximod is derived from the awesome [Raxicore Editor](https://github.com/psforever/raxicore-editor),
-originally created by [GeekOfWires](https://github.com/GeekOfWires) and published by the PSForever
+originally created by [GeekOfWires](https://github.com/GeekOfWires) and published by the [PSForever](github.com/psforever)
 project. Raximod transforms Raxicore Editor from a desktop viewer and editor into a headless toolkit
 focused on asset extraction, inspection, validation, and packaging. Raximod remains distributed
 under the MIT License.
