@@ -56,6 +56,7 @@ internal sealed record VehicleExportData(
     SeatMountPointExport[] SeatMountPoints,
     SeatAnimationExport[] SeatAnimations,
     object? Physics,
+    object? DeployedPhysics,
     WheelExport[] Wheels);
 
 internal sealed record WheelExport(

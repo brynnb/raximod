@@ -9,10 +9,39 @@ must survive. This is a runtime translation correction, not permission to
 replace the authored texture or change material definitions. TerraSunder's
 `docs/planetside-unlit-material-stages.md` records the source and GPU checks.
 
+Transparent submission has two native paths. The generic queue sorts
+`trunc(distanceSquared(drawOrigin))*256 + mat_sortkey` descending (default key
+zero); preserve this key through faction/event replacements. World alpha
+material batches instead flush after that queue in first-submission order.
+Retail `0x9d2195` indexes sections by ID before `0x9d5d20` visits them;
+`0x9d5e3e -> 0xa19760 -> 0xa195f0` batches and flushes without mat_sortkey.
+Export `submissionOrder` from actual retained geometry, preserving mesh-array
+order and sorting each mesh's sections by ID. Do not flatten it into a material
+key, alter raw parser order, or generalize the generic queue to all meshes.
+Metadata-only refresh must preserve the geometry binding and honor existing
+mesh-selection receipts. Legacy multi-mesh exports without receipts require
+regeneration, not a guessed LOD. `mat_sortalpha` is a different command. Explicit
+`mat_noneN` binds NULL, unlike the actual texture resource `null.dds`: a color
+operation actively reading the unbound texture terminates the stage cascade.
+Do not erase this binding or substitute a white texture. Unused color arguments
+and alpha-only reads do not terminate it. TerraSunder's
+`docs/planetside-terminal-materials.md` records original executable provenance,
+API evidence, rendered checks and the thin-batch sorting approximation. Native
+commands belong to the material sidecar; geometry submission identity belongs
+alongside them without merging distinct material definitions.
+
 This is the canonical operational guide for turning an installed PlanetSide client into the
 transport-neutral assets consumed by TerraSunder. It describes the boundary between the two
 repositories, the production order, the output contracts, and native conventions that should not
 need to be reverse-engineered again.
+
+The native character pane's ten-step rank meter counts completed tenths of
+experience toward the next rank; its paired thin meter shows progress within
+the current tenth. This comes from `ui_hud_characterpane.inc` and the original
+executable's `0x5cfe0c–0x5cfe49` battle path and `0x5cff06–0x5cff49`
+command path. TerraSunder records the source hash, formula, and consumer
+contract in `docs/planetside-character-rank-progress.md`. Keep the source bar
+images separate from the mutable character XP used to fill them.
 
 ## Repositories and responsibilities
 
@@ -64,6 +93,14 @@ The source libraries are deliberately split:
 
 Never flatten away the raw representation merely because a current exporter needs one resolved
 value. Lossless parsing and semantic resolution must remain independently inspectable.
+
+Portable material resolution and native sidecars must consume the same `materials.adb` source:
+`startup.pak-out/materials.adb` when present, otherwise the `startup.pak` entry. The texture provider
+derives both views from one decoded database. Previously the portable view read only the packed
+archive, silently losing authored texture aliases in extracted-only inputs. For example, both
+`vehiclegentread_3a` and `vehiclegentread_3b` bind `mat_texture1 vehiclegentread_3`; they are distinct
+materials sharing one image, not two missing image files. A malformed extracted database must fail
+instead of making one view silently use a different source.
 
 ## Input families
 
@@ -300,12 +337,68 @@ existing simulation interval for frame-rate consistency; that normalization is
 an explicit browser adaptation. See TerraSunder `docs/planetside-weapon-accuracy.md`
 for the complete evidence chain, numerical examples and tests.
 
+Native mode `defaultCOF`, `crouchCOF`, `maxCOF` and `shotspread` retain their original
+angular values. In that same executable, `0x906420` samples a uniform radius
+`random01 * tan(COF * PI / 180)` and a uniform azimuth; there is no square-root
+area sampler. Crosshair `0x5b73d0` uses `radians(COF) * HUD height / FOV`, with a
+3.33-pixel minimum and rounded diagonal components. These are runtime rules,
+not permission to rescale authored weapon values or precompute resolution-specific
+metadata. TerraSunder's accuracy document records the trace and browser adaptation.
+
+Do not treat an ADB `clientfiremodeN_crosshair` name as a directly loaded UI page.
+In that same binary, `0x426da9 -> 0x564c60 -> 0x505c80` selects only Ace, REK,
+Vanu, ClusterBomb and SingleBomb special cases; all other names use
+`DefaultCrosshair`. In particular `VanuCrosshair` selects `PistolVanuCrosshair`,
+while the Beamer's literal `PistolVanuCrosshair` name takes the default branch.
+Preserve authored names in the weapon manifest; the runtime factory implements
+selection. TerraSunder's `export-planetside-reticles.mjs` translates the selected
+UI image sizes, source rectangles, opacity and rotations with source hashes.
+Default layout `0x5b7620` keeps the center image, anchors cardinal image edges to
+the cone radius and hides diagonals below 30 pixels. Dormant rifle UI ellipses
+are not evidence for rendering rifle arcs.
+
+Native zoom affects input before turning accuracy: `0x41f8ac` stores current
+FOV at manager `+0x114`, consumed by `0x748c80` before the angle14 magnitude at
+`0x7491b7`. Recovery has no additional zoom multiplier. Browser FOV-relative
+sensitivity belongs at the shared input boundary, not in exported COF values.
+
 `ClientCombatMetadata` additionally exports native mode `recoil`,
 `burstRefireSlopMs`, `stamina: { required, drain }`, and weapon `optics` (ordered
 `zoomlevelN`, `showscopeticks`) for both handheld and mounted weapon families.
 `raximod export native-catalogs` emits `infantry-gameplay.json`, preserving resolved armor
 recovery, damage, movement penalties and MAX look parameters with provenance.
 Do not reinstate a second hand-maintained armor accuracy table in the client.
+
+The same armor projection exports nullable `jumpJets`: lift acceleration, start
+threshold, drain rate, capacity, recharge delay/rate, and exact start/loop/end
+sound tuples. `vshev` authors 15 lift, 0 threshold, 20 drain/s, 50 capacity,
+5000 ms delay and 3 recharge/s. Partial jet definitions or malformed sound tuples
+fail extraction. Retail 3.15.84.0 `0x573e09` multiplies armor getter `0x912f70`
+(lift at +0x110) by elapsed seconds and adds to vertical velocity; export this as
+acceleration, not height or a separate ordinary-jump impulse. Regenerate only
+native catalogs for this metadata change; existing MAX meshes, animation banks
+and audio already contain the required assets.
+
+The nullable `travel` projection preserves MAX walk/run speeds, authored
+`autorun_acceltime_ms`/`autorun_deceltime_ms` and engage/disengage sounds. All
+three faction records specify 6000/3500 ms. The absent `autorun_init_delay_ms`
+has an explicit recovered 1000 ms default: retail 3.15.84.0 constructor
+`0x94da51`, armor +90, getter `0x912d40`, scheduler call `0x58ca40`.
+Do not fold this into acceleration time. Retail `0x58caf0` changes speed by
+`(run - walk) * elapsedSeconds * 1000 / authoredTime`, clamping to run speed on
+acceleration and walk speed on braking; the latter also releases the weapon
+lock. Both `runforward_base` and `autorunforward_base` exist in MAX packages;
+travel must select the latter explicitly. Regenerate native catalogs only.
+
+The lossless `game-object-catalog.json` also preserves armor
+`no_held_weapon_run_speed_multiplier`: Standard 1.25, Agile 1.28, Reinforced
+1.33 and Infiltration 1.23, inherited by faction/sex variants. TerraSunder's
+existing movement-profile source audit checks these fields alongside native gait
+speeds. Apply the bonus only to running when the server confirms hands down
+(`Player.HandsDownSlot`, 255), not when a weapon model is absent or reloading.
+Keep source gait values immutable across state changes; do not compound repeated
+snapshots. MAX has no such field: its separate weapons-down travel mode cannot
+be recovered by borrowing an ordinary armor multiplier or ignoring `can_run`.
 
 Original shot update `0x908820` resets only after refire plus authored burst slop,
 then applies the mode's recoil when count reaches the threshold. Accuracy
@@ -1160,7 +1253,7 @@ dispatch at `0x790e7d–0x790f5a`. These are narrow original-code findings, not 
   virtual `refposeN` entry resolves to archive clips named `<animation>_refNN`; export at least its
   neutral `_ref00` clip with mount/dismount. Otherwise the one-shot mount ends in a T-pose.
 - Every supported non-BFR vehicle must author a `physics` name, that name must resolve in
-  `physics.lst`, and its model must contain at least one object-colliding `role=body` primitive.
+  the installed `physics*.lst` corpus, and its model must contain at least one object-colliding `role=body` primitive.
   A sphere referenced by `phys_carwheel` is `role=wheel-contact` and cannot satisfy the body
   footprint invariant. Static turret presentation records are a separate path: several author a
   same-named identifier for which no `physics.lst` model exists. That does not weaken the vehicle
@@ -1556,6 +1649,18 @@ dispatch at `0x790e7d–0x790f5a`. These are narrow original-code findings, not 
 
 ### Materials and textures
 
+- World faction displays use the same native package swaps: `banner` replaces
+  `_flag_generic+null` with `trlogo` at `epackage.adb` stream offset 14120, and
+  `tech_banner_flag` replaces `_flag_generic2+null` with `trlogo2` at 98040
+  (corresponding NC/VS scopes are retained). Outfit decal scopes are separate.
+  Exported portal children retain their authored parent identity/pose. Consumers
+  must bind that parent to mutable server ownership in a common coordinate
+  space: exported placements are uncentered Y-up, while TerraSunder's network
+  adapter already delivers centered Y-up entities. Apply only the world-size
+  centering offset to the placement, not a second basis conversion. Exported
+  owner GUIDs are not authoritative runtime identities; server owner map IDs
+  take precedence. Neutral flags on owned towers can therefore be a consumer
+  identity/coordinate defect even when the package export is correct.
 - Vehicle faction skins are whole `epackage.adb` material swaps, not texture-name
   substitutions. `NativeMaterialManifestTool` exports `factionBindings` with ordinary
   `nc`/`tr`/`vs` scopes, source/replacement identities, hidden material sections and
@@ -1953,3 +2058,80 @@ research are maintained with TerraSunder in
 `docs/planetside-native-runtime-provenance.md`. Keeping those notes with their consumer prevents this
 extractor guide from becoming the changelog for a particular engine while preserving the source
 contracts above.
+
+### Friendly-fire discipline provenance
+
+The resolved ADB catalog preserves `game_properties.grief_*`, `no_grief`,
+`inflicts_grief`, `bfr_shield_damage_grief_modifier` and `grief_interval`.
+PSForever's `tools/generate_native_grief.py` projects these into server policy data
+with a catalog hash and scalar validation. Preserve inheritance and all values;
+do not infer the original server accumulator formula from field names.
+PlanetSide 3.15.84.0 receives grief scores through attribute 14 (hundredths), and
+lock time through attribute 15 (tenths of seconds). Its score setter at `0x8fe1c0`
+adds 60 seconds per positive point delta only while already at grief level 3;
+`0x8fe410` clamps to `grief_lock_max_seconds`. The original accumulator remains
+unrecovered; PSForever documents its adaptation in `FRIENDLY_FIRE.md`.
+TerraSunder's chat exporter also reads `ui_hud_griefindicator.inc` for the native
+`grief_weapons_lock_icon` and uses native localization for threshold warnings.
+
+Friendly-hit feedback is an executable-selected sound, not an ADB effect graph:
+the same original executable interns `player_hit_friendly_feedback.wav` at
+`0x501460` and plays it from the positive grief-score notification through
+`0x5103ae -> 0x506cc0`. `0x506d42..0x506d6e` limits playback to elapsed integer
+seconds strictly greater than five. Preserve the existing `pack/waves.pak` audio
+entry; do not invent per-level warning/lock sound aliases. TerraSunder documents
+the trace and authoritative snapshot integration in `docs/planetside-friendly-fire.md`.
+
+
+### Deployed vehicle collision publication (schema 15)
+
+The family exporter reads all `startup.pak-out/physics*.lst`, matching the collision
+exporter's source corpus. Native `physics_deployed` binds ANT to `ant_deployed`,
+AMS to `ams_fixed`, Router to `router_fixed`, and Flail to `flail_deployed`.
+AMS/Router compounds are authored in `physics_fixed_misc.lst`; the others are in
+`physics.lst`. Each profile retains its source filename. `vehicles[].deployedPhysics`
+is a full native profile or explicit null, generated by the same profile compiler
+as mobile `physics`, never a list of per-vehicle replacement dimensions.
+
+Both vehicle-family and shared-world collision companions retain the deployed
+object-colliding primitives in a disabled `deployed` group. Declared missing
+models fail extraction. Shared render aliases must agree on deployed model names;
+serialized family publication checks deployed IDs and source-basis centers against
+the companion. Native tests also verify box dimensions and rotations across all
+four bindings and prove failed extraction cannot replace a valid companion.
+
+TerraSunder switches the already-created groups using accepted server deployment
+state. It keeps mobile physics through `deploying`, deployed physics through
+`undeploying`, and preserves local ownership, cargo suppression and wreck selection.
+That transition boundary is a documented browser policy, not recovered retail
+intermediate physics. Do not infer an AMS transition shape from `ams_fixed_moving`
+or commented `#physicsdeploy1_*` fields without tracing their original call sites.
+
+Regenerate with `export vehicles ... --reuse-assets` against a validated existing
+family. Publish exporter, client schema validation, manifest and collision companions
+together. These changes do not require a server physics or protocol update.
+
+
+## Mobile utility and force-field consumers
+
+AMS equipment mount zones and force-field graphs are already present in the
+lossless catalogs. Preserve all `equipmentmountzone*_location`,
+`*_requiresdeployment` / `*_requiresnonflying`, `respawn_time`, and
+`force_field_*` properties, plus the `ams_cloak` / `ams_cloak_hit` meshes and
+their native material animations. Vehicle utility wrappers must be resolved to
+their real terminal GUIDs by the consumer; attached visible terminal meshes are
+not sufficient interaction data. `range_based_cloak=1` must not be interpreted
+as a one-metre cloak radius. TerraSunder's `docs/planetside-mobile-logistics.md`
+documents its current authored-mesh containment approximation separately from
+recovered retail behavior. No exporter override or regeneration was needed.
+
+### Respawn frequency and countdown consumers
+
+The resolved avatar properties `respawn_death_sampling_interval` and paired
+`respawn_delay_level_N`/`respawn_delay_level_N_deaths` are milliseconds and death
+count thresholds. PSForever's `tools/generate_native_respawn.py` projects the
+whole tier table and validates ordering; do not replace it with a per-death
+constant or treat the interval as seconds. TerraSunder displays the server's
+accepted countdown through its shared Reach meter, following the original
+`ui_hud_overheadmap.inc` RespawnCountdown/RespawnProgress controls. Neither
+request retries nor presentation snapshots represent new deaths.

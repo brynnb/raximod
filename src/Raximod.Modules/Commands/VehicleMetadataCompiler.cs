@@ -253,63 +253,17 @@ public VehicleExportData Compile(string definition, string sourceRecord)
                 $"Vehicle '{definition}' physics model '{physicsModel.Name}' has no authored phys_com_offset");
         PhysicsListDatabase.Shape[] wheelConstraints = physicsModel?.Shapes
             .Where(shape => shape.Kind == PhysicsListDatabase.ShapeKind.CarWheel).ToArray() ?? [];
-        var physicsProfile = physicsModel == null ? null : new
+        object? physicsProfile = physicsModel is null ? null : ExportPhysicsProfile(physicsModel);
+        string? deployedName = Value("physics_deployed");
+        PhysicsListDatabase.Model? deployedModel = null;
+        if (deployedName is not null && !deployedName.Equals("none", StringComparison.OrdinalIgnoreCase))
         {
-            source = "physics.lst",
-            model = physicsModel.Name,
-            coordinateSystem = VehicleManifestContract.NativeDataCoordinateSystem,
-            centerOfMassOffset = physicsModel.CenterOfMassOffset is System.Numerics.Vector3 centerOfMass
-                ? new
-                {
-                    vector = new[] { centerOfMass.X, centerOfMass.Y, centerOfMass.Z },
-                    coordinateSystem = VehicleManifestContract.NativeDataCoordinateSystem,
-                    sourceCommand = "phys_com_offset",
-                    runtimeFidelity = VehicleManifestContract.CenterOfMassRuntimeFidelity,
-                }
-                : null,
-            retainedUnsupportedCommands = physicsModel.UnsupportedCommands
-                .GroupBy(command => command.Name, StringComparer.OrdinalIgnoreCase)
-                .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(group => new { command = group.Key, occurrences = group.Count() })
-                .ToArray(),
-            primitives = VehicleManifestContract.CollisionPrimitives(
-                    physicsModel, objectCollidingOnly: false)
-                .Select(shape => new
-                {
-                    name = shape.Name,
-                    kind = shape.Kind.ToString().ToLowerInvariant(),
-                    role = VehicleManifestContract.PrimitiveRole(physicsModel, shape),
-                    mass = shape.Mass,
-                    size = shape.Kind == PhysicsListDatabase.ShapeKind.Box
-                        ? new[] { shape.Size.X, shape.Size.Y, shape.Size.Z } : null,
-                    radius = shape.Kind is PhysicsListDatabase.ShapeKind.Sphere
-                        or PhysicsListDatabase.ShapeKind.Cylinder ? shape.Radius : (float?)null,
-                    length = shape.Kind == PhysicsListDatabase.ShapeKind.Cylinder
-                        ? shape.Length : (float?)null,
-                    position = new[] { shape.Position.X, shape.Position.Y, shape.Position.Z },
-                    orientationRadians = new[] {
-                        shape.Orientation.X, shape.Orientation.Y, shape.Orientation.Z,
-                    },
-                    cookie = string.IsNullOrWhiteSpace(shape.Cookie) ? null : shape.Cookie,
-                    material = string.IsNullOrWhiteSpace(shape.Material) ? null : shape.Material,
-                    aggregate = string.IsNullOrWhiteSpace(shape.Aggregate) ? null : shape.Aggregate,
-                    collidesWithObjects = shape.CollidesWithObjects,
-                    collidesWithTerrain = shape.CollidesWithTerrain,
-                    usesSkeletonTransform = shape.UsesSkeletonTransform,
-                    collisionBoneOffset = new[] {
-                        shape.CollisionBoneOffset.X,
-                        shape.CollisionBoneOffset.Y,
-                        shape.CollisionBoneOffset.Z,
-                    },
-                    centerOfMassOffset = shape.CenterOfMassOffset is System.Numerics.Vector3 primitiveCenterOfMass
-                        ? new[] { primitiveCenterOfMass.X, primitiveCenterOfMass.Y, primitiveCenterOfMass.Z }
-                        : null,
-                    offsetHighLimit = shape.OffsetHighLimit is System.Numerics.Vector3 high
-                        ? new[] { high.X, high.Y, high.Z } : null,
-                    offsetLowLimit = shape.OffsetLowLimit is System.Numerics.Vector3 low
-                        ? new[] { low.X, low.Y, low.Z } : null,
-                }).ToArray(),
-        };
+            _ = VehicleManifestContract.RequireVehiclePhysics(physics, definition + ":deployed", deployedName);
+            deployedModel = physics.FindModel(deployedName)
+                ?? throw new InvalidDataException(
+                    $"Vehicle '{definition}' physics_deployed '{deployedName}' is missing");
+        }
+        object? deployedPhysicsProfile = deployedModel is null ? null : ExportPhysicsProfile(deployedModel);
         var wheels = gameObject.Properties
             .Select(property => Regex.Match(property.Key, "^wheel(\\d+)_constraint$", RegexOptions.IgnoreCase))
             .Where(match => match.Success)
@@ -745,6 +699,68 @@ public VehicleExportData Compile(string definition, string sourceRecord)
         };
         return new VehicleExportData(
             handling, flightPresentation!, camera, audio, cargo, destruction,
-            animationAttachBone, seatMountPoints, seatAnimations, physicsProfile, wheels);
+            animationAttachBone, seatMountPoints, seatAnimations, physicsProfile, deployedPhysicsProfile, wheels);
+    }
+    // Both state profiles retain the same native primitive contract; state selection
+    // belongs to the consumer, never a separate set of hand-authored hull sizes.
+    private static object ExportPhysicsProfile(PhysicsListDatabase.Model physicsModel)
+    {
+        return new
+        {
+            source = physicsModel.SourceFile,
+            model = physicsModel.Name,
+            coordinateSystem = VehicleManifestContract.NativeDataCoordinateSystem,
+            centerOfMassOffset = physicsModel.CenterOfMassOffset is System.Numerics.Vector3 centerOfMass
+                ? new
+                {
+                    vector = new[] { centerOfMass.X, centerOfMass.Y, centerOfMass.Z },
+                    coordinateSystem = VehicleManifestContract.NativeDataCoordinateSystem,
+                    sourceCommand = "phys_com_offset",
+                    runtimeFidelity = VehicleManifestContract.CenterOfMassRuntimeFidelity,
+                }
+                : null,
+            retainedUnsupportedCommands = physicsModel.UnsupportedCommands
+                .GroupBy(command => command.Name, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new { command = group.Key, occurrences = group.Count() })
+                .ToArray(),
+            primitives = VehicleManifestContract.CollisionPrimitives(
+                    physicsModel, objectCollidingOnly: false)
+                .Select(shape => new
+                {
+                    name = shape.Name,
+                    kind = shape.Kind.ToString().ToLowerInvariant(),
+                    role = VehicleManifestContract.PrimitiveRole(physicsModel, shape),
+                    mass = shape.Mass,
+                    size = shape.Kind == PhysicsListDatabase.ShapeKind.Box
+                        ? new[] { shape.Size.X, shape.Size.Y, shape.Size.Z } : null,
+                    radius = shape.Kind is PhysicsListDatabase.ShapeKind.Sphere
+                        or PhysicsListDatabase.ShapeKind.Cylinder ? shape.Radius : (float?)null,
+                    length = shape.Kind == PhysicsListDatabase.ShapeKind.Cylinder
+                        ? shape.Length : (float?)null,
+                    position = new[] { shape.Position.X, shape.Position.Y, shape.Position.Z },
+                    orientationRadians = new[] {
+                        shape.Orientation.X, shape.Orientation.Y, shape.Orientation.Z,
+                    },
+                    cookie = string.IsNullOrWhiteSpace(shape.Cookie) ? null : shape.Cookie,
+                    material = string.IsNullOrWhiteSpace(shape.Material) ? null : shape.Material,
+                    aggregate = string.IsNullOrWhiteSpace(shape.Aggregate) ? null : shape.Aggregate,
+                    collidesWithObjects = shape.CollidesWithObjects,
+                    collidesWithTerrain = shape.CollidesWithTerrain,
+                    usesSkeletonTransform = shape.UsesSkeletonTransform,
+                    collisionBoneOffset = new[] {
+                        shape.CollisionBoneOffset.X,
+                        shape.CollisionBoneOffset.Y,
+                        shape.CollisionBoneOffset.Z,
+                    },
+                    centerOfMassOffset = shape.CenterOfMassOffset is System.Numerics.Vector3 primitiveCenterOfMass
+                        ? new[] { primitiveCenterOfMass.X, primitiveCenterOfMass.Y, primitiveCenterOfMass.Z }
+                        : null,
+                    offsetHighLimit = shape.OffsetHighLimit is System.Numerics.Vector3 high
+                        ? new[] { high.X, high.Y, high.Z } : null,
+                    offsetLowLimit = shape.OffsetLowLimit is System.Numerics.Vector3 low
+                        ? new[] { low.X, low.Y, low.Z } : null,
+                }).ToArray(),
+        };
     }
 }

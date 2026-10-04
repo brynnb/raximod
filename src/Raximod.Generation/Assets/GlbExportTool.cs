@@ -128,6 +128,7 @@ namespace Raximod.Generation.Assets
             int embeddedTextures = 0;
             var nativeMaterialUsage = new Dictionary<string, NativeMaterialManifestTool.Usage>(
                 StringComparer.OrdinalIgnoreCase);
+            var submissionSections = new List<NativeMaterialMetadataRefresh.SubmissionSection>();
             MaterialBuilder MaterialFor(string name)
             {
                 if (materials.TryGetValue(name, out MaterialBuilder? cached)) return cached;
@@ -248,6 +249,7 @@ namespace Raximod.Generation.Assets
                         ? AddSkinnedSection(rig!.Mesh, material, section, geometryOffset, rigidBone)
                         : AddStaticSection(StaticMeshForSource(), material, section, geometryOffset);
                     if (added == 0) continue;
+                    submissionSections.Add(new(mesh.Id, section.Id, materialName));
 
                     if (nativeMaterialUsage.TryGetValue(materialName, out var usage))
                     {
@@ -353,7 +355,8 @@ namespace Raximod.Generation.Assets
                     options.RecordName,
                     nativeMaterialUsage.Values.ToArray(),
                     textures,
-                    sharedTextureDirectory);
+                    sharedTextureDirectory,
+                    NativeMaterialMetadataRefresh.OrderedSections(submissionSections));
                 HighestQualityMeshSelectionManifestTool.Write(
                     outputPath, options.RecordName, selection, keep, selectionPolicy);
             }

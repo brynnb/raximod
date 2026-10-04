@@ -88,7 +88,8 @@ namespace Raximod
             output.WriteLine("      [--shared-textures <directory>] [--no-textures] [--no-animations]");
             output.WriteLine("      [--max-animations <count>] [--receipt <file.json>]");
             output.WriteLine("      [--animation-prefix <prefix>]... [--mesh-material <material>]...");
-            output.WriteLine("      [--materials-only | --render-states-only]");
+            output.WriteLine("      [--materials-only | --render-states-only | --submission-only]");
+            output.WriteLine("      --submission-only also accepts a directory; --selection-receipts-only limits it to recorded geometry selections");
             output.WriteLine("  raximod export game --source <PlanetSide> --psforever <repo> --out <bundle>");
             output.WriteLine("      [--config <raximod.json>] [--overwrite] [--plan] [--workers <count>]");
             output.WriteLine("      [--texture-stage <directory>] [--skip-cross-family-dedup] [--fail-on-warning]");

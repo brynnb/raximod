@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
-using Raximod.EngineAssets.Archives;
 
 namespace Raximod.EngineAssets.Databases
 {
@@ -50,28 +48,19 @@ namespace Raximod.EngineAssets.Databases
         /// <summary>Number of material definitions parsed.</summary>
         public int Count => _byName.Count;
 
-        /// <summary>Load and parse <c>&lt;assetDir&gt;/startup.pak → materials.adb</c>, or null if it is
-        /// absent. Malformed data throws: extraction must never silently fall back
-        /// after a source database was found.</summary>
+        /// <summary>Load materials.adb using the shared extracted-then-packed database lookup,
+        /// or null if absent. Malformed data throws rather than silently falling back.</summary>
         public static MaterialsAdb? TryLoad(string? assetDir)
         {
-            if (string.IsNullOrEmpty(assetDir)) return null;
-            string pakPath = Path.Combine(assetDir, "startup.pak");
-            if (!File.Exists(pakPath)) return null;
-            PakArchive pak = PakArchive.Load(File.ReadAllBytes(pakPath));
-            int idx = pak.IndexOf("materials.adb");
-            if (idx < 0) return null;
-            var m = new MaterialsAdb();
-            m.ParseInternal(pak.Extract(idx));
-            return m;
+            AsciiCommandDatabase? database = AsciiCommandDatabase.TryLoad(assetDir, "materials.adb");
+            return database == null ? null : FromDatabase(database);
         }
 
         public static MaterialsAdb Parse(byte[] data)
         {
             ArgumentNullException.ThrowIfNull(data);
-            var result = new MaterialsAdb();
-            result.ParseInternal(data);
-            return result;
+            return FromDatabase(AsciiCommandDatabase.Parse(data)
+                ?? throw new InvalidDataException("materials.adb has no semantic records"));
         }
 
         /// <summary>
@@ -142,12 +131,12 @@ namespace Raximod.EngineAssets.Databases
             return true;
         }
 
-        private void ParseInternal(byte[] data)
+        internal static MaterialsAdb FromDatabase(AsciiCommandDatabase database)
         {
-            AsciiCommandDatabase database = AsciiCommandDatabase.Parse(data)
-                ?? throw new InvalidDataException("materials.adb has no semantic records");
+            var result = new MaterialsAdb();
             foreach ((string name, IReadOnlyList<AsciiCommandDatabase.Command> commands) in database.Records)
-                _byName.Add(name, ReadRecord(commands));
+                result._byName.Add(name, ReadRecord(commands));
+            return result;
         }
 
         private static MaterialDef ReadRecord(IReadOnlyList<AsciiCommandDatabase.Command> commands)

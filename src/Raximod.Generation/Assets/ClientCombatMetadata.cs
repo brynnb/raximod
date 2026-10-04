@@ -66,6 +66,8 @@ public static class ClientCombatMetadata
         return new
         {
             definition = source.Name, provenance = source.Provenance,
+            jumpJets = JumpJets(source),
+            travel = MaxTravel(source),
             accuracy = new
             {
                 // Native armor offsets +cc/e0/e4: subtracted from mode COFrecovery.
@@ -97,6 +99,56 @@ public static class ClientCombatMetadata
                 overdriveYawMultiplier = Value("overdrive_turn_rate_multiplier"),
                 overdrivePitchMultiplier = Value("overdrive_pitch_rate_multiplier"),
             },
+        };
+    }
+
+    public static object? MaxTravel(GameObjectDb.GameObject source)
+    {
+        string[] fields = ["autorun_acceltime_ms", "autorun_deceltime_ms"];
+        if (fields.All(field => Number(source, field) is null)) return null;
+        float Required(string field) => Number(source, field)
+            ?? throw new InvalidDataException($"{source.Name}: incomplete MAX travel, missing {field}");
+        string Sound(string field) => GameObjectPropertyReader.Scalar(source, field)
+            ?? throw new InvalidDataException($"{source.Name}: missing MAX travel sound {field}");
+        return new {
+            walkSpeed = Required("walk_forward_speed"), runSpeed = Required("run_forward_speed"),
+            accelerationMs = Required(fields[0]), decelerationMs = Required(fields[1]),
+            // Retail constructor 0x94da51, armor +90; getter 0x912d40 is
+            // scheduled by 0x58ca40. This field is absent in shipped MAX ADBs.
+            activationDelayMs = Number(source, "autorun_init_delay_ms") ?? 1000,
+            activationDelayProvenance = Number(source, "autorun_init_delay_ms") is null
+                ? "planetside.exe 3.15.84.0 0x94da51 armor+90 default" : "ADB autorun_init_delay_ms",
+            sounds = new { engage = Sound("sound_autorun_engage"), disengage = Sound("sound_autorun_disengage") },
+        };
+    }
+
+    public static object? JumpJets(GameObjectDb.GameObject source)
+    {
+        string[] fields = ["capacitor_jump_lift", "capacitor_jump_min", "capacitor_jump_power_per_second"];
+        if (fields.All(field => Number(source, field) is null)) return null;
+        float Required(string field) => Number(source, field)
+            ?? throw new InvalidDataException($"{source.Name}: incomplete jump jets, missing {field}");
+        object Sound(string field)
+        {
+            var values = GameObjectPropertyReader.Tuple(source, field, 3)
+                ?? throw new InvalidDataException($"{source.Name}: missing jump-jet sound {field}");
+            float Numeric(int index)
+            {
+                if (float.TryParse(values[index], NumberStyles.Float, CultureInfo.InvariantCulture, out float value)
+                    && float.IsFinite(value) && value >= 0) return value;
+                throw new InvalidDataException($"{source.Name}: invalid {field} argument {index}");
+            }
+            return new { file = values[0], volume = Numeric(1), maxDistance = Numeric(2) };
+        }
+        // Retail 3.15.84.0 0x573e09: armor getter 0x912f70 * elapsed seconds
+        // is added to vertical velocity. Preserve acceleration, not a jump height.
+        return new {
+            liftAcceleration = Required(fields[0]), minimumCapacitor = Required(fields[1]),
+            drainPerSecond = Required(fields[2]), maximumCapacitor = Required("capacitor_max"),
+            rechargeDelayMs = Required("capacitor_recharge_delay_ms"),
+            rechargePerSecond = Required("capacitor_recharge_per_second"),
+            sounds = new { start = Sound("sound_activate"), loop = Sound("sound_active_loop"),
+                end = Sound("sound_deactivate") },
         };
     }
 }

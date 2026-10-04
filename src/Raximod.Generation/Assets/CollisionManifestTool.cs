@@ -491,6 +491,8 @@ namespace Raximod.Generation.Assets
             int initialCount = output.Count;
             AddModelProperty(gameObject, "physics", "active", true, "static", physics, output,
                 objectCollidingOnly: true);
+            AddModelProperty(gameObject, "physics_deployed", "deployed", false, "static", physics, output,
+                objectCollidingOnly: true);
             AddModelProperty(gameObject, "destroyedphysics", "destroyed", false, "destroyed", physics, output,
                 objectCollidingOnly: false);
 
@@ -583,6 +585,9 @@ namespace Raximod.Generation.Assets
         {
             string? name = Scalar(gameObject, property);
             PhysicsListDatabase.Model? model = physics.FindModel(name);
+            if (property == "physics_deployed" && name is not null
+                && !name.Equals("none", StringComparison.OrdinalIgnoreCase) && model is null)
+                throw new InvalidDataException($"{gameObject.Name}.{property}: native physics model '{name}' is missing");
             if (model != null) AddPhysicsModel(
                 model, group, enabled, behavior, output, Vector3.Zero, 0f, objectCollidingOnly);
         }

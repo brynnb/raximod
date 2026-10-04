@@ -51,6 +51,7 @@ namespace Raximod.EngineAssets.Databases
         public sealed class Model
         {
             public string Name { get; init; } = "";
+            public string SourceFile { get; init; } = "";
             public List<Shape> Shapes { get; } = new();
             /// <summary>
             /// The authored <c>phys_com_offset</c> on the model's root primitive. The source
@@ -166,7 +167,7 @@ namespace Raximod.EngineAssets.Databases
                 switch (command)
                 {
                     case "phys_model" when fields.Length >= 2:
-                        model = new Model { Name = fields[1] };
+                        model = new Model { Name = fields[1], SourceFile = Path.GetFileName(path) };
                         _models[model.Name] = model;
                         shape = null;
                         triangleMesh = null;

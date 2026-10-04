@@ -37,7 +37,26 @@ Useful switches:
 --bake-world-offset       bake a map record's source placement into its vertices
 --profile shared          reference an explicit shared texture pool
 --shared-textures <dir>   shared texture directory; required by the shared profile
+--submission-only         refresh native geometry submission bindings without rewriting the GLB
+--selection-receipts-only directory refresh: select models with existing mesh-selection receipts
 ```
+
+Shared model export includes native `{meshId, sectionId, material}` submission
+bindings in its material companion. They preserve source mesh-array order and
+indexed section order; material-only refresh retains them. This is separate
+from `mat_sortkey`, which applies to the native generic alpha queue rather than
+its world material batches. Bulk-upgrade recorded geometry selections with:
+
+```bash
+raximod export model --source <PlanetSideDir> --out <asset-output-directory> \
+  --submission-only --selection-receipts-only
+```
+
+The command reports excluded legacy companions. For a focused refresh use a
+GLB output path and `--record`; a single-source-mesh record is unambiguous, but
+multiple-mesh exports without a selection receipt must be fully regenerated.
+Source-coverage companions resolve map-specific archive provenance. Refresh
+does not alter geometry, textures, material commands or animation.
 
 Export a texture by its literal DDS record name (without material-name resolution) with
 `raximod export texture --materials <name,...> --exact --out <directory>`. This is required for runtime

@@ -12,15 +12,26 @@ namespace Raximod
         {
             var args = new CommandArguments(arguments);
             string source = args.Required("--source");
-            string record = args.Required("--record");
+            string? requestedRecord = args.Value("--record");
             string output = args.Required("--out");
             ExportProfile profile = ExportProfiles.Parse(args.Value("--profile"));
             string? sharedTextures = args.Value("--shared-textures");
 
             bool materialsOnly = args.Has("--materials-only");
             bool renderStatesOnly = args.Has("--render-states-only");
-            if (materialsOnly && renderStatesOnly)
-                throw new ArgumentException("Choose either --materials-only or --render-states-only, not both.");
+            bool submissionOnly = args.Has("--submission-only");
+            if (new[] { materialsOnly, renderStatesOnly, submissionOnly }.Count(value => value) > 1)
+                throw new ArgumentException("Choose one metadata-only refresh mode.");
+            if (args.Has("--selection-receipts-only") && !submissionOnly)
+                throw new ArgumentException("--selection-receipts-only requires --submission-only.");
+            if (submissionOnly)
+            {
+                int changed = NativeMaterialMetadataRefresh.SubmissionOrders(source, output, requestedRecord, args.Value("--library"),
+                    args.Has("--selection-receipts-only"));
+                Console.WriteLine($"refreshed native submission order in {changed} companions");
+                return 0;
+            }
+            string record = requestedRecord ?? throw new ArgumentException("Missing required option --record.");
 
             if (renderStatesOnly)
             {

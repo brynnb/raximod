@@ -10,7 +10,7 @@ public sealed class VehicleManifestContractTests
     [Fact]
     public void CoordinateContractDistinguishesConvertedModelsFromRetainedNativeVectors()
     {
-        Assert.Equal(14, VehicleManifestContract.SchemaVersion);
+        Assert.Equal(15, VehicleManifestContract.SchemaVersion);
         Assert.Equal("right-handed-y-up", VehicleManifestContract.ModelAssetCoordinateSystem);
         Assert.Equal("right-handed-z-up", VehicleManifestContract.NativeDataCoordinateSystem);
         Assert.NotEqual(
@@ -279,6 +279,7 @@ public sealed class VehicleManifestContractTests
                   "vehicles": [
                     {
                       "definition": "battlewagon",
+                      "deployedPhysics": null,
                       "model": "models/battlewagontr.glb",
                       "physics": {
                         "model": "mediumtransport",
@@ -303,6 +304,7 @@ public sealed class VehicleManifestContractTests
                     },
                     {
                       "definition": "battlewagon_alias",
+                      "deployedPhysics": null,
                       "model": "models/battlewagontr.glb",
                       "physics": {
                         "model": "mediumtransport",

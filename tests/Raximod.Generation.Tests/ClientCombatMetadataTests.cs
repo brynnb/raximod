@@ -11,6 +11,51 @@ public sealed class ClientCombatMetadataTests
     private static JsonElement Json(object value) => JsonSerializer.SerializeToElement(value);
 
     [Fact]
+    public void MaxTravelRequiresCompleteFieldsAndPreservesNativeActivationDefault()
+    {
+        var record = Record();
+        Assert.Null(ClientCombatMetadata.MaxTravel(record));
+        record.Properties["autorun_acceltime_ms"] = ["6000"];
+        Assert.Throws<InvalidDataException>(() => ClientCombatMetadata.MaxTravel(record));
+        record.Properties["autorun_deceltime_ms"] = ["3500"];
+        record.Properties["walk_forward_speed"] = ["3.75"];
+        record.Properties["run_forward_speed"] = ["12"];
+        record.Properties["sound_autorun_engage"] = ["engage.wav"];
+        record.Properties["sound_autorun_disengage"] = ["disengage.wav"];
+        var travel = Json(ClientCombatMetadata.MaxTravel(record)!);
+        Assert.Equal(1000, travel.GetProperty("activationDelayMs").GetSingle());
+        Assert.Contains("0x94da51", travel.GetProperty("activationDelayProvenance").GetString());
+        Assert.Equal(6000, travel.GetProperty("accelerationMs").GetSingle());
+        record.Properties["autorun_init_delay_ms"] = ["750"];
+        Assert.Equal(750, Json(ClientCombatMetadata.MaxTravel(record)!).GetProperty("activationDelayMs").GetSingle());
+        record.Properties["sound_autorun_engage"] = ["a.wav", "b.wav"];
+        Assert.Throws<InvalidDataException>(() => ClientCombatMetadata.MaxTravel(record));
+    }
+
+    [Fact]
+    public void JumpJetsRequireCompleteNativeFieldsAndSoundTuples()
+    {
+        var record = Record();
+        Assert.Null(ClientCombatMetadata.JumpJets(record));
+        record.Properties["capacitor_jump_lift"] = ["15"];
+        Assert.Throws<InvalidDataException>(() => ClientCombatMetadata.JumpJets(record));
+        record.Properties["capacitor_jump_min"] = ["0"];
+        record.Properties["capacitor_jump_power_per_second"] = ["20"];
+        record.Properties["capacitor_max"] = ["50"];
+        record.Properties["capacitor_recharge_delay_ms"] = ["5000"];
+        record.Properties["capacitor_recharge_per_second"] = ["3"];
+        foreach (var sound in new[] { "sound_activate", "sound_active_loop", "sound_deactivate" })
+            record.Properties[sound] = ["native.wav", "0.5", "25"];
+        var jets = Json(ClientCombatMetadata.JumpJets(record)!);
+        Assert.Equal(15, jets.GetProperty("liftAcceleration").GetSingle());
+        Assert.Equal(0, jets.GetProperty("minimumCapacitor").GetSingle());
+        Assert.Equal(20, jets.GetProperty("drainPerSecond").GetSingle());
+        Assert.Equal(25, jets.GetProperty("sounds").GetProperty("loop").GetProperty("maxDistance").GetSingle());
+        record.Properties["sound_active_loop"] = ["native.wav", "0.5"];
+        Assert.Throws<InvalidDataException>(() => ClientCombatMetadata.JumpJets(record));
+    }
+
+    [Fact]
     public void ModeDynamicsRetainZeroAndRejectMalformedScalars()
     {
         var record = Record();

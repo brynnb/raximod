@@ -22,7 +22,7 @@ public static class VehicleManifestContract
         return match;
     }
 
-    public const int SchemaVersion = 14;
+    public const int SchemaVersion = 15;
     public const string ModelAssetCoordinateSystem = "right-handed-y-up";
     public const string NativeDataCoordinateSystem = "right-handed-z-up";
     public const string UnsupportedRuntimeFidelity = "transported-unsupported";
@@ -273,31 +273,7 @@ public static class VehicleManifestContract
                 || primitives.ValueKind != JsonValueKind.Array)
                 throw new InvalidDataException($"Vehicle '{definition}' physics has no primitives array");
 
-            var expected = new List<ActiveCollisionShape>();
-            foreach (JsonElement primitive in primitives.EnumerateArray())
-            {
-                if (!primitive.TryGetProperty("collidesWithObjects", out JsonElement collides)
-                    || collides.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-                {
-                    throw new InvalidDataException(
-                        $"Vehicle '{definition}' physics primitive has no boolean collidesWithObjects");
-                }
-                if (collides.ValueKind == JsonValueKind.False) continue;
-                string role = RequiredString(
-                    primitive, "role", $"vehicle '{definition}' physics primitive");
-                if (!role.Equals("body", StringComparison.Ordinal)
-                    && !role.Equals("wheel-contact", StringComparison.Ordinal))
-                {
-                    throw new InvalidDataException(
-                        $"Vehicle '{definition}' has object-colliding primitive with unknown role '{role}'");
-                }
-                string name = RequiredString(
-                    primitive, "name", $"vehicle '{definition}' physics primitive");
-                expected.Add(new ActiveCollisionShape(
-                    $"physics:{physicsModel}:{name}",
-                    RequiredVector3(
-                        primitive, "position", $"vehicle '{definition}' physics primitive '{name}'")));
-            }
+            List<ActiveCollisionShape> expected = ProfileCollisionShapes(definition, physics);
 
             string sidecarPath = Path.Combine(modelsDirectory, record + ".collision.json");
             if (!File.Exists(sidecarPath))
@@ -326,6 +302,23 @@ public static class VehicleManifestContract
                 .ToArray();
             RequireMatchingActiveCollisionSidecar(
                 $"vehicle '{definition}' collision record '{record}'", expected, active);
+
+            if (!vehicle.TryGetProperty("deployedPhysics", out JsonElement deployed)
+                || deployed.ValueKind is not (JsonValueKind.Null or JsonValueKind.Object))
+                throw new InvalidDataException($"Vehicle '{definition}' has no valid deployedPhysics contract");
+            if (deployed.ValueKind == JsonValueKind.Object)
+            {
+                List<ActiveCollisionShape> deployedExpected = ProfileCollisionShapes(definition, deployed);
+                EmittedCollisionShape[] deployedShapes = shapes.EnumerateArray()
+                    .Where(shape => StringPropertyEquals(shape, "source", "physics_lst")
+                        && StringPropertyEquals(shape, "group", "deployed")
+                        && shape.GetProperty("enabled").ValueKind == JsonValueKind.False)
+                    .Select(shape => new EmittedCollisionShape(
+                        RequiredString(shape, "id", definition), RequiredFloatArray(shape, "center", definition)))
+                    .ToArray();
+                RequireMatchingActiveCollisionSidecar(
+                    $"vehicle '{definition}' deployed collision record '{record}'", deployedExpected, deployedShapes);
+            }
 
             if (vehicle.TryGetProperty("destruction", out JsonElement destruction)
                 && destruction.ValueKind == JsonValueKind.Object
@@ -356,6 +349,38 @@ public static class VehicleManifestContract
             throw new InvalidDataException(
                 $"Vehicle collision publication audited {audited} of {expectedDefinitionCount} definitions");
         return audited;
+    }
+
+    private static List<ActiveCollisionShape> ProfileCollisionShapes(string context, JsonElement physics)
+    {
+        string physicsModel = RequiredString(physics, "model", context);
+        JsonElement primitives = physics.GetProperty("primitives");
+        var expected = new List<ActiveCollisionShape>();
+        foreach (JsonElement primitive in primitives.EnumerateArray())
+        {
+            if (!primitive.TryGetProperty("collidesWithObjects", out JsonElement collides)
+                || collides.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                throw new InvalidDataException(
+                    $"Vehicle '{context}' physics primitive has no boolean collidesWithObjects");
+            }
+            if (collides.ValueKind == JsonValueKind.False) continue;
+            string role = RequiredString(
+                primitive, "role", $"vehicle '{context}' physics primitive");
+            if (!role.Equals("body", StringComparison.Ordinal)
+                && !role.Equals("wheel-contact", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"Vehicle '{context}' has object-colliding primitive with unknown role '{role}'");
+            }
+            string name = RequiredString(
+                primitive, "name", $"vehicle '{context}' physics primitive");
+            expected.Add(new ActiveCollisionShape(
+                $"physics:{physicsModel}:{name}",
+                RequiredVector3(
+                    primitive, "position", $"vehicle '{context}' physics primitive '{name}'")));
+        }
+        return expected;
     }
 
     private static Dictionary<string, ActiveCollisionShape> ActiveShapesById(

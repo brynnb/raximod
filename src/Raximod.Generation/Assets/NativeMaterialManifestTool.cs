@@ -18,11 +18,23 @@ namespace Raximod.Generation.Assets
             string record,
             IReadOnlyCollection<Usage> usages,
             TextureProvider textures,
-            string? sharedTextureDirectory = null)
+            string? sharedTextureDirectory = null,
+            NativeMaterialMetadataRefresh.SubmissionSection[]? submissionOrder = null)
         {
             var document = BuildDocument(Path.GetDirectoryName(glbPath)!, record, usages, textures, sharedTextureDirectory);
             string path = Path.ChangeExtension(glbPath, ".materials.json");
-            string json = JsonSerializer.Serialize(document);
+            var node = JsonSerializer.SerializeToNode(document)!.AsObject();
+            if (submissionOrder is not null)
+                node["submissionOrder"] = JsonSerializer.SerializeToNode(submissionOrder,
+                    new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            else if (File.Exists(path))
+            {
+                // Materials-only refresh leaves geometry and its native section
+                // bindings intact. A complete geometry export supplies new IDs.
+                var existing = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))?["submissionOrder"];
+                if (existing is not null) node["submissionOrder"] = existing.DeepClone();
+            }
+            string json = node.ToJsonString();
             if (!File.Exists(path) || File.ReadAllText(path) != json) File.WriteAllText(path, json);
         }
 

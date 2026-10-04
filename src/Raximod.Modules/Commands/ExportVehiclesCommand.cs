@@ -146,6 +146,9 @@ public static class ExportVehiclesCommand
         string? DestroyedPhysics(string definition, string sourceRecord) =>
             ObjectValue(Object(definition), "destroyedphysics")
             ?? ObjectValue(Object(sourceRecord), "destroyedphysics");
+        string? DeployedPhysics(string definition, string sourceRecord) =>
+            ObjectValue(Object(definition), "physics_deployed")
+            ?? ObjectValue(Object(sourceRecord), "physics_deployed");
         bool? SourceFlag(string definition, string sourceRecord, string key)
         {
             string? value = ObjectValue(Object(definition), key) ?? ObjectValue(Object(sourceRecord), key);
@@ -319,8 +322,7 @@ public static class ExportVehiclesCommand
         }
         string physicsPath = Path.Combine(planetside, "startup.pak-out", "physics.lst");
         if (!File.Exists(physicsPath)) throw new FileNotFoundException("Extracted physics.lst not found", physicsPath);
-        var physics = new PhysicsListDatabase();
-        physics.ParseFile(physicsPath);
+        var physics = PhysicsListDatabase.ParseDirectory(Path.GetDirectoryName(physicsPath)!);
         var vehiclePhysicsCoverage = vehicleModels
             .Select(pair => VehicleManifestContract.RequireVehiclePhysics(
                 physics, pair.Key, PhysicsName(pair.Key, pair.Value)))
@@ -355,7 +357,7 @@ public static class ExportVehiclesCommand
         int retainedUnsupportedCount = physics.RetainedUnsupportedCommands.Count;
         Console.WriteLine(
             $"validated native physics for {vehiclePhysicsCoverage.Count} non-BFR vehicles; "
-            + $"retained {retainedUnsupportedCount} unsupported physics.lst commands");
+            + $"retained {retainedUnsupportedCount} unsupported physics*.lst commands");
         var modelResults = new Dictionary<string, ExportedAsset>(StringComparer.OrdinalIgnoreCase);
         foreach (string record in vehicleRenderRecords.Values.Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -371,6 +373,7 @@ public static class ExportVehiclesCommand
         var collisionExpectedByRecord = new Dictionary<string,
             IReadOnlyCollection<VehicleManifestContract.ActiveCollisionShape>>(StringComparer.OrdinalIgnoreCase);
         var collisionDestroyedByRecord = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var collisionDeployedByRecord = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var collisionOwnerByRecord = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         int collisionDefinitionAudits = 0;
         foreach ((string definition, string sourceRecord) in vehicleModels)
@@ -382,6 +385,7 @@ public static class ExportVehiclesCommand
             VehicleManifestContract.ActiveCollisionShape[] expected =
                 VehicleManifestContract.ActiveObjectCollisionShapes(model);
             string? destroyedPhysics = DestroyedPhysics(definition, sourceRecord);
+            string? deployedPhysics = DeployedPhysics(definition, sourceRecord);
             string renderRecord = vehicleRenderRecords[definition];
 
             if (collisionExpectedByRecord.TryGetValue(
@@ -393,6 +397,10 @@ public static class ExportVehiclesCommand
                         + $"sharing render record '{renderRecord}'",
                     sharedExpected,
                     expected);
+                if (!string.Equals(collisionDeployedByRecord[renderRecord], deployedPhysics,
+                        StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException(
+                        $"Vehicle definitions sharing '{renderRecord}' author different deployed physics");
                 if (!string.Equals(
                         collisionDestroyedByRecord[renderRecord],
                         destroyedPhysics,
@@ -410,6 +418,7 @@ public static class ExportVehiclesCommand
                 collisionDefinitionsByRecord[renderRecord] = definition;
                 collisionExpectedByRecord[renderRecord] = expected;
                 collisionDestroyedByRecord[renderRecord] = destroyedPhysics;
+                collisionDeployedByRecord[renderRecord] = deployedPhysics;
                 collisionOwnerByRecord[renderRecord] = definition;
             }
             collisionDefinitionAudits++;
@@ -729,6 +738,7 @@ public static class ExportVehiclesCommand
                 seatMountPoints = vehicleData.SeatMountPoints,
                 seatAnimations = vehicleData.SeatAnimations,
                 physics = vehicleData.Physics,
+                deployedPhysics = vehicleData.DeployedPhysics,
                 wheelsCoordinateSystem = VehicleManifestContract.NativeDataCoordinateSystem,
                 wheels = vehicleData.Wheels,
                 // Only weapons with native mobile/deployed arcs consume this pose contract.
@@ -841,7 +851,7 @@ public static class ExportVehiclesCommand
             gameObjects = gameObjectDatabase.Diagnostics,
             physicsListCommandCoverage = new
             {
-                source = "physics.lst",
+                source = "physics*.lst",
                 knownCommands = PhysicsListDatabase.KnownCommandNames
                     .Order(StringComparer.OrdinalIgnoreCase).ToArray(),
                 encounteredCommands = physics.CommandCounts

@@ -75,8 +75,11 @@ namespace Raximod.EngineAssets.Textures
                 try { IndexArchive(fat); _sourceArchives.Add(fat); }
                 catch (Exception error) { _indexErrors.Add($"{fat}: {error.Message}"); }
             }
-            _materials = MaterialsAdb.TryLoad(assetDir);
             _materialCommands = AsciiCommandDatabase.TryLoad(assetDir, "materials.adb");
+            // Portable materials and native sidecars must use the same source. Loading
+            // the semantic view from startup.pak alone dropped aliases (such as the
+            // Prowler tread materials) when only startup.pak-out was available.
+            _materials = _materialCommands == null ? null : MaterialsAdb.FromDatabase(_materialCommands);
             _stageCommands = AsciiCommandDatabase.TryLoad(assetDir, "stages.adb");
             _animationCommands = AsciiCommandDatabase.TryLoad(assetDir, "anims.adb");
             _renderStateCommands = AsciiCommandDatabase.TryLoad(assetDir, "renderstate.adb");
